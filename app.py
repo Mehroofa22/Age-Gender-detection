@@ -15,7 +15,18 @@ st.set_page_config(
 )
 
 # Base directory for absolute paths
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+ageProto = os.path.join(BASE_DIR, "age_deploy.prototxt")
+ageModel = os.path.join(BASE_DIR, "age_net.caffemodel")
+
+genderProto = os.path.join(BASE_DIR, "gender_deploy.prototxt")
+genderModel = os.path.join(BASE_DIR, "gender_net.caffemodel")
+
+
+ageNet = cv2.dnn.readNet(ageModel, ageProto)
+genderNet = cv2.dnn.readNet(genderModel, genderProto)
 
 # 2. Premium Styling using Custom CSS
 st.markdown("""
