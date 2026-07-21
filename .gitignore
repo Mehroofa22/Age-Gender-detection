@@ -36,8 +36,6 @@ ENV/
 .ipynb_checkpoints/
 
 # Project large binary model files (weights)
-*.caffemodel
-*.pb
 
 # Local generated/test images & logs
 sample_woman.png
