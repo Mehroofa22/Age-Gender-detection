@@ -91,8 +91,8 @@ st.markdown("""
 
 # 3. Model Loading with Cache
 @st.cache_resource
+@st.cache_resource
 def load_models():
-    """Loads and caches the face detector, age model, and gender model."""
     face_proto = os.path.join(BASE_DIR, "opencv_face_detector.pbtxt")
     face_weights = os.path.join(BASE_DIR, "opencv_face_detector_uint8.pb")
     age_proto = os.path.join(BASE_DIR, "age_deploy.prototxt")
@@ -100,7 +100,20 @@ def load_models():
     gender_proto = os.path.join(BASE_DIR, "gender_deploy.prototxt")
     gender_weights = os.path.join(BASE_DIR, "gender_net.caffemodel")
 
-    # Load DNN networks
+    files = [
+        face_proto,
+        face_weights,
+        age_proto,
+        age_weights,
+        gender_proto,
+        gender_weights
+    ]
+
+    for f in files:
+        if not os.path.exists(f):
+            st.error(f"Missing file: {f}")
+            st.stop()
+
     face_net = cv2.dnn.readNet(face_weights, face_proto)
     age_net = cv2.dnn.readNet(age_weights, age_proto)
     gender_net = cv2.dnn.readNet(gender_weights, gender_proto)
@@ -110,82 +123,93 @@ def load_models():
 # Model constant mean values and target sizes
 MODEL_MEAN_VALUES = (78.4263377603, 87.7689143744, 114.895847746)
 AGE_GROUPS = ['(0-2)', '(4-6)', '(8-12)', '(15-20)', '(25-32)', '(38-43)', '(48-53)', '(60-100)']
-GENDER_CLASSES = ['Male', 'Female']
+GENDER_CLASSES = ['Female', 'Male']
 
 # 4. Processing Functions
-def detect_and_predict(image_bgr, conf_threshold=0.7, padding=15):
-    """Detects faces in BGR image and predicts age and gender for each."""
+def detect_and_predict(image_bgr, conf_threshold=0.7, padding=20):
+    """Detect faces and predict age/gender."""
+
     face_net, age_net, gender_net = load_models()
-    
-    fr_cv = image_bgr.copy()
-    fr_h, fr_w = fr_cv.shape[:2]
-    
-    # 1. Prepare blob for face detection
-    blob = cv2.dnn.blobFromImage(fr_cv, 1.0, (300, 300), [104, 117, 123], True, False)
+
+    frame = image_bgr.copy()
+    h, w = frame.shape[:2]
+
+    blob = cv2.dnn.blobFromImage(
+        frame,
+        scalefactor=1.0,
+        size=(300, 300),
+        mean=(104, 117, 123),
+        swapRB=False,
+        crop=False,
+    )
+
     face_net.setInput(blob)
     detections = face_net.forward()
-    
+
     results = []
-    
-    # 2. Iterate through detections
+
     for i in range(detections.shape[2]):
+
         confidence = detections[0, 0, i, 2]
-        if confidence > conf_threshold:
-            # Face bounding box coords
-            x1 = int(detections[0, 0, i, 3] * fr_w)
-            y1 = int(detections[0, 0, i, 4] * fr_h)
-            x2 = int(detections[0, 0, i, 5] * fr_w)
-            y2 = int(detections[0, 0, i, 6] * fr_h)
-            
-            # Boundary clamps
-            x1_clamp = max(0, x1)
-            y1_clamp = max(0, y1)
-            x2_clamp = min(fr_w - 1, x2)
-            y2_clamp = min(fr_h - 1, y2)
-            
-            # Crop box with padding
-            face_y1 = max(0, y1_clamp - padding)
-            face_y2 = min(fr_h - 1, y2_clamp + padding)
-            face_x1 = max(0, x1_clamp - padding)
-            face_x2 = min(fr_w - 1, x2_clamp + padding)
-            
-            if face_y2 > face_y1 and face_x2 > face_x1:
-                # Crop original face image without box overlays
-                face_img = image_bgr[face_y1:face_y2, face_x1:face_x2]
-                
-                # Blob for classifier (227x227 image size)
-                face_blob = cv2.dnn.blobFromImage(face_img, 1.0, (227, 227), MODEL_MEAN_VALUES, swapRB=False)
-                
-                # Gender estimation
-                gender_net.setInput(face_blob)
-                gender_preds = gender_net.forward()
-                # Apply Softmax for probabilities
-                gender_probs_exp = np.exp(gender_preds[0] - np.max(gender_preds[0]))
-                gender_probs = gender_probs_exp / np.sum(gender_probs_exp)
-                gender_idx = gender_probs.argmax()
-                gender_label = GENDER_CLASSES[gender_idx]
-                
-                # Age estimation
-                age_net.setInput(face_blob)
-                age_preds = age_net.forward()
-                # Apply Softmax
-                age_probs_exp = np.exp(age_preds[0] - np.max(age_preds[0]))
-                age_probs = age_probs_exp / np.sum(age_probs_exp)
-                age_idx = age_probs.argmax()
-                age_label = AGE_GROUPS[age_idx]
-                
-                results.append({
-                    "box": (x1_clamp, y1_clamp, x2_clamp, y2_clamp),
-                    "face_img": face_img,
-                    "gender": gender_label,
-                    "gender_conf": gender_probs[gender_idx],
-                    "gender_probs": gender_probs.tolist(),
-                    "age": age_label,
-                    "age_conf": age_probs[age_idx],
-                    "age_probs": age_probs.tolist(),
-                    "face_conf": confidence
-                })
-                
+
+        if confidence < conf_threshold:
+            continue
+
+        x1 = int(detections[0, 0, i, 3] * w)
+        y1 = int(detections[0, 0, i, 4] * h)
+        x2 = int(detections[0, 0, i, 5] * w)
+        y2 = int(detections[0, 0, i, 6] * h)
+
+        x1 = max(0, x1 - padding)
+        y1 = max(0, y1 - padding)
+        x2 = min(w - 1, x2 + padding)
+        y2 = min(h - 1, y2 + padding)
+
+        face = frame[y1:y2, x1:x2]
+
+        if face.size == 0:
+            continue
+
+        face = cv2.resize(face, (227, 227))
+
+        face_blob = cv2.dnn.blobFromImage(
+            face,
+            scalefactor=1.0,
+            size=(227, 227),
+            mean=MODEL_MEAN_VALUES,
+            swapRB=True,
+            crop=False,
+        )
+
+        gender_net.setInput(face_blob)
+        gender_preds = gender_net.forward()[0]
+
+        age_net.setInput(face_blob)
+        age_preds = age_net.forward()[0]
+
+        gender_idx = np.argmax(gender_preds)
+        age_idx = np.argmax(age_preds)
+
+        gender_probs = np.exp(gender_preds)
+        gender_probs /= gender_probs.sum()
+
+        age_probs = np.exp(age_preds)
+        age_probs /= age_probs.sum()
+
+        results.append(
+            {
+                "box": (x1, y1, x2, y2),
+                "face_img": face,
+                "gender": GENDER_CLASSES[gender_idx],
+                "gender_conf": float(gender_probs[gender_idx]),
+                "gender_probs": gender_probs.tolist(),
+                "age": AGE_GROUPS[age_idx],
+                "age_conf": float(age_probs[age_idx]),
+                "age_probs": age_probs.tolist(),
+                "face_conf": float(confidence),
+            }
+        )
+
     return results
 
 def draw_annotations(image_bgr, results):
